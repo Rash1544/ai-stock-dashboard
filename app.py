@@ -1,248 +1,533 @@
-import streamlit as st
-import yfinance as yf
-import pandas as pd
-import plotly.graph_objects as go
-from ta.momentum import RSIIndicator
-from ta.trend import MACD
+# app.py
 
-# -----------------------------
+import streamlit as st
+import pandas as pd
+import yfinance as yf
+import matplotlib.pyplot as plt
+import plotly.graph_objects as go
+import datetime
+
+from agents.recommendation_agent import recommend_stock
+from agents.risk_agent import calculate_risk
+from agents.scoring_agent import analyze_stock
+from agents.news_agent import analyze_news_sentiment
+
+# ---------------------------------------------------
 # PAGE CONFIG
-# -----------------------------
+# ---------------------------------------------------
 
 st.set_page_config(
-    page_title="AI Stock Dashboard",
+    page_title="Multi-Agent AI Investment Advisor",
     layout="wide"
 )
 
-st.title("🚀 AI Advanced Stock Dashboard")
+# ---------------------------------------------------
+# TITLE
+# ---------------------------------------------------
 
-# -----------------------------
-# STOCK SELECTION
-# -----------------------------
+st.title("🚀 Multi-Agent AI Investment Advisor")
 
-stocks = ["AAPL", "MSFT", "TSLA", "NVDA", "GOOGL"]
+st.markdown("""
+This AI-powered platform performs:
 
-selected_stock = st.selectbox(
-    "Select Stock",
-    stocks
+✅ Live Stock Analysis  
+✅ Technical Indicator Analysis  
+✅ AI-Based Stock Scoring  
+✅ Risk Assessment  
+✅ News Sentiment Analysis  
+✅ Portfolio Recommendations  
+""")
+
+# ---------------------------------------------------
+# LIVE STOCK ANALYSIS
+# ---------------------------------------------------
+
+st.header("📈 Live Stock Analysis")
+
+stock = st.text_input(
+    "Enter Stock Symbol",
+    value="RELIANCE.NS"
+).upper()
+
+# ---------------------------------------------------
+# DATE INPUTS
+# ---------------------------------------------------
+
+today = datetime.date.today()
+
+start_date = st.date_input(
+    "Start Date",
+    value=today - datetime.timedelta(days=180)
 )
 
-# -----------------------------
-# DOWNLOAD DATA
-# -----------------------------
-
-data = yf.download(
-    selected_stock,
-    period="5y"
+end_date = st.date_input(
+    "End Date",
+    value=today
 )
 
-# -----------------------------
-# FIX MULTIINDEX COLUMNS
-# -----------------------------
+# ---------------------------------------------------
+# DATE VALIDATION
+# ---------------------------------------------------
 
-if isinstance(data.columns, pd.MultiIndex):
-    data.columns = data.columns.get_level_values(0)
+if start_date >= end_date:
 
-# -----------------------------
-# TECHNICAL INDICATORS
-# -----------------------------
+    st.error(
+        "End date must be after start date."
+    )
 
-data["50_MA"] = data["Close"].rolling(50).mean()
-data["200_MA"] = data["Close"].rolling(200).mean()
+    st.stop()
 
-# RSI
-rsi_indicator = RSIIndicator(close=data["Close"])
-data["RSI"] = rsi_indicator.rsi()
+# ---------------------------------------------------
+# ANALYZE STOCK BUTTON
+# ---------------------------------------------------
 
-# MACD
-macd = MACD(close=data["Close"])
+if st.button("Analyze Stock"):
 
-data["MACD"] = macd.macd()
-data["Signal"] = macd.macd_signal()
+    # Download stock data
+    data = yf.download(
+        stock,
+        start=start_date,
+        end=end_date
+    )
 
-# -----------------------------
-# PRICE METRICS
-# -----------------------------
+    # ---------------------------------------------------
+    # CHECK DATA
+    # ---------------------------------------------------
 
-start_price = float(data["Close"].iloc[0])
-current_price = float(data["Close"].iloc[-1])
+    if data.empty:
 
-growth = ((current_price - start_price) / start_price) * 100
+        st.error("No stock data found.")
 
-risk = data["Close"].std()
+    else:
 
-# -----------------------------
-# AI SUGGESTION ENGINE
-# -----------------------------
+        # ---------------------------------------------------
+        # SHOW DATA
+        # ---------------------------------------------------
 
-latest_rsi = data["RSI"].iloc[-1]
-latest_macd = data["MACD"].iloc[-1]
-latest_signal = data["Signal"].iloc[-1]
+        st.subheader(f"📋 {stock} Stock Data")
 
-suggestion = "HOLD"
+        st.dataframe(data.tail())
 
-if growth > 100 and latest_macd > latest_signal:
-    suggestion = "BUY"
+        # ---------------------------------------------------
+        # CLOSE PRICES
+        # ---------------------------------------------------
 
-if growth > 200 and latest_macd > latest_signal:
-    suggestion = "STRONG BUY"
+        close_prices = data["Close"].squeeze()
 
-if latest_rsi > 80:
-    suggestion = "OVERBOUGHT"
+        # ---------------------------------------------------
+        # MOVING AVERAGE
+        # ---------------------------------------------------
 
-# -----------------------------
-# CANDLESTICK CHART
-# -----------------------------
+        data["MA20"] = close_prices.rolling(
+            window=20
+        ).mean()
 
-fig = go.Figure()
+        # ---------------------------------------------------
+        # RSI CALCULATION
+        # ---------------------------------------------------
 
-fig.add_trace(go.Candlestick(
-    x=data.index,
-    open=data["Open"],
-    high=data["High"],
-    low=data["Low"],
-    close=data["Close"],
-    name="Candlestick"
-))
+        delta = close_prices.diff()
 
-# Moving averages
-fig.add_trace(go.Scatter(
-    x=data.index,
-    y=data["50_MA"],
-    line=dict(color="orange"),
-    name="50 Day MA"
-))
+        gain = delta.where(
+            delta > 0,
+            0
+        )
 
-fig.add_trace(go.Scatter(
-    x=data.index,
-    y=data["200_MA"],
-    line=dict(color="green"),
-    name="200 Day MA"
-))
+        loss = -delta.where(
+            delta < 0,
+            0
+        )
 
-fig.update_layout(
-    title=f"{selected_stock} Professional Trading Chart",
-    xaxis_title="Date",
-    yaxis_title="Price",
-    height=700
+        avg_gain = gain.rolling(
+            window=14
+        ).mean()
+
+        avg_loss = loss.rolling(
+            window=14
+        ).mean()
+
+        rs = avg_gain / avg_loss
+
+        data["RSI"] = 100 - (
+            100 / (1 + rs)
+        )
+
+        # ---------------------------------------------------
+        # PROFESSIONAL CANDLESTICK CHART
+        # ---------------------------------------------------
+
+        st.subheader("📊 Professional Stock Chart")
+
+        fig = go.Figure()
+
+        # Candlestick chart
+        fig.add_trace(
+
+            go.Candlestick(
+
+                x=data.index,
+
+                open=data["Open"],
+
+                high=data["High"],
+
+                low=data["Low"],
+
+                close=data["Close"],
+
+                name="Candlestick"
+            )
+        )
+
+        # Moving Average
+        fig.add_trace(
+
+            go.Scatter(
+
+                x=data.index,
+
+                y=data["MA20"],
+
+                line=dict(
+                    color="orange",
+                    width=2
+                ),
+
+                name="20-Day MA"
+            )
+        )
+
+        # Layout
+        fig.update_layout(
+
+            height=600,
+
+            template="plotly_dark",
+
+            xaxis_rangeslider_visible=False,
+
+            title=f"{stock} Candlestick Analysis"
+        )
+
+        st.plotly_chart(
+            fig,
+            use_container_width=True
+        )
+
+        # ---------------------------------------------------
+        # RSI CHART
+        # ---------------------------------------------------
+
+        st.subheader("📉 RSI Indicator")
+
+        fig2, ax2 = plt.subplots(
+            figsize=(12, 3)
+        )
+
+        ax2.plot(
+            data.index,
+            data["RSI"],
+            label="RSI"
+        )
+
+        ax2.axhline(
+            70,
+            linestyle="--"
+        )
+
+        ax2.axhline(
+            30,
+            linestyle="--"
+        )
+
+        ax2.legend()
+
+        st.pyplot(fig2)
+
+        # ---------------------------------------------------
+        # TECHNICAL INSIGHT
+        # ---------------------------------------------------
+
+        latest_rsi = data["RSI"].iloc[-1]
+
+        st.subheader("🧠 AI Technical Insight")
+
+        if latest_rsi > 70:
+
+            st.error(
+                "⚠️ Stock may be Overbought"
+            )
+
+        elif latest_rsi < 30:
+
+            st.success(
+                "✅ Stock may be Oversold"
+            )
+
+        else:
+
+            st.info(
+                "ℹ️ Stock is in Neutral Zone"
+            )
+
+        # ---------------------------------------------------
+        # RISK ANALYSIS
+        # ---------------------------------------------------
+
+        risk_data = calculate_risk(stock)
+
+        st.subheader("⚠️ AI Risk Analysis")
+
+        st.write(
+            f"Risk Level: "
+            f"{risk_data['risk_level']}"
+        )
+
+        st.write(
+            f"Volatility Score: "
+            f"{risk_data['volatility']}"
+        )
+
+        # ---------------------------------------------------
+        # AI STOCK ANALYSIS
+        # ---------------------------------------------------
+
+        ai_result = analyze_stock(stock)
+
+        if ai_result:
+
+            st.subheader(
+                "🤖 AI Stock Intelligence"
+            )
+
+            col1, col2 = st.columns(2)
+
+            with col1:
+
+                st.metric(
+                    "AI Score",
+                    ai_result["score"]
+                )
+
+                st.metric(
+                    "RSI",
+                    ai_result["rsi"]
+                )
+
+            with col2:
+
+                st.metric(
+                    "Recommendation",
+                    ai_result["recommendation"]
+                )
+
+                st.metric(
+                    "Volatility",
+                    ai_result["volatility"]
+                )
+
+            # ---------------------------------------------------
+            # AI REASONING
+            # ---------------------------------------------------
+
+            st.subheader("📌 AI Reasoning")
+
+            for reason in ai_result["reasons"]:
+
+                st.success(reason)
+
+        else:
+
+            st.error(
+                "Unable to analyze stock."
+            )
+
+        # ---------------------------------------------------
+        # NEWS SENTIMENT ANALYSIS
+        # ---------------------------------------------------
+
+        news_result = analyze_news_sentiment(stock)
+
+        st.subheader("📰 AI News Sentiment")
+
+        col3, col4 = st.columns(2)
+
+        with col3:
+
+            st.metric(
+                "Market Sentiment",
+                news_result["sentiment"]
+            )
+
+        with col4:
+
+            st.metric(
+                "Sentiment Score",
+                news_result["score"]
+            )
+
+        # ---------------------------------------------------
+        # HEADLINES
+        # ---------------------------------------------------
+
+        st.subheader("🗞️ Latest Headlines")
+
+        for headline in news_result["headlines"]:
+
+            st.write(f"• {headline}")
+
+# ---------------------------------------------------
+# AI RECOMMENDATION AGENT
+# ---------------------------------------------------
+
+st.header(
+    "🤖 AI Investment Recommendation Agent"
 )
 
-st.plotly_chart(fig, use_container_width=True)
-
-# -----------------------------
-# RSI CHART
-# -----------------------------
-
-st.subheader("📈 RSI Indicator")
-
-rsi_fig = go.Figure()
-
-rsi_fig.add_trace(go.Scatter(
-    x=data.index,
-    y=data["RSI"],
-    line=dict(color="purple"),
-    name="RSI"
-))
-
-rsi_fig.add_hline(y=70, line_dash="dash", line_color="red")
-rsi_fig.add_hline(y=30, line_dash="dash", line_color="green")
-
-rsi_fig.update_layout(
-    height=300
+investment_amount = st.number_input(
+    "Enter Investment Amount (₹)",
+    min_value=1000,
+    step=1000
 )
 
-st.plotly_chart(rsi_fig, use_container_width=True)
-
-# -----------------------------
-# MACD CHART
-# -----------------------------
-
-st.subheader("📉 MACD Indicator")
-
-macd_fig = go.Figure()
-
-macd_fig.add_trace(go.Scatter(
-    x=data.index,
-    y=data["MACD"],
-    line=dict(color="blue"),
-    name="MACD"
-))
-
-macd_fig.add_trace(go.Scatter(
-    x=data.index,
-    y=data["Signal"],
-    line=dict(color="orange"),
-    name="Signal Line"
-))
-
-macd_fig.update_layout(
-    height=300
+risk_level = st.selectbox(
+    "Select Risk Level",
+    ["Low", "Medium", "High"]
 )
 
-st.plotly_chart(macd_fig, use_container_width=True)
+duration = st.selectbox(
+    "Investment Duration",
+    ["Short Term", "Long Term"]
+)
 
-# -----------------------------
-# METRICS
-# -----------------------------
+# ---------------------------------------------------
+# RECOMMENDATION BUTTON
+# ---------------------------------------------------
 
-st.subheader("📊 AI Analysis")
+if st.button("Get AI Recommendation"):
 
-col1, col2, col3, col4 = st.columns(4)
+    recommended_stocks = recommend_stock(
+        risk_level,
+        duration
+    )
 
-col1.metric("Start Price", f"${start_price:.2f}")
-col2.metric("Current Price", f"${current_price:.2f}")
-col3.metric("Growth %", f"{growth:.2f}%")
-col4.metric("Risk", f"{risk:.2f}")
+    st.subheader("📌 Recommended Stocks")
 
-# -----------------------------
-# AI SUGGESTION
-# -----------------------------
+    for stock_name in recommended_stocks:
 
-st.subheader("💡 AI Investment Suggestion")
+        st.success(f"✅ {stock_name}")
 
-if suggestion == "STRONG BUY":
-    st.success("🔥 STRONG BUY")
+    # ---------------------------------------------------
+    # PORTFOLIO ALLOCATION
+    # ---------------------------------------------------
 
-elif suggestion == "BUY":
-    st.success("✅ BUY")
+    allocation = (
+        investment_amount /
+        len(recommended_stocks)
+    )
 
-elif suggestion == "OVERBOUGHT":
-    st.warning("⚠ OVERBOUGHT")
+    st.subheader(
+        "💰 Suggested Portfolio Allocation"
+    )
 
-else:
-    st.info("⏳ HOLD")
+    for stock_name in recommended_stocks:
 
-# -----------------------------
-# RSI INTERPRETATION
-# -----------------------------
+        st.write(
+            f"₹ {allocation:.2f} "
+            f"→ {stock_name}"
+        )
 
-st.subheader("📈 RSI Interpretation")
+    # ---------------------------------------------------
+    # PIE CHART
+    # ---------------------------------------------------
 
-if latest_rsi > 70:
-    st.warning(f"RSI = {latest_rsi:.2f} → Stock may be OVERBOUGHT")
+    st.subheader("📊 Portfolio Distribution")
 
-elif latest_rsi < 30:
-    st.success(f"RSI = {latest_rsi:.2f} → Stock may be OVERSOLD")
+    fig3, ax3 = plt.subplots()
 
-else:
-    st.info(f"RSI = {latest_rsi:.2f} → Normal Range")
+    ax3.pie(
+        [allocation] * len(recommended_stocks),
+        labels=recommended_stocks,
+        autopct='%1.1f%%'
+    )
 
-# -----------------------------
-# MACD INTERPRETATION
-# -----------------------------
+    st.pyplot(fig3)
 
-st.subheader("📉 MACD Interpretation")
+    # ---------------------------------------------------
+    # STOCK INTELLIGENCE
+    # ---------------------------------------------------
 
-if latest_macd > latest_signal:
-    st.success("MACD is above Signal Line → Bullish Momentum")
+    st.subheader(
+        "🧠 Recommended Stock Intelligence"
+    )
 
-else:
-    st.error("MACD is below Signal Line → Bearish Momentum")
+    for stock_name in recommended_stocks:
 
-# -----------------------------
-# DATA TABLE
-# -----------------------------
+        st.markdown(f"## {stock_name}")
 
-st.subheader("📋 Raw Stock Data")
+        ai_analysis = analyze_stock(stock_name)
 
-st.dataframe(data.tail())
+        if ai_analysis:
+
+            st.write(
+                f"AI Score: "
+                f"{ai_analysis['score']}"
+            )
+
+            st.write(
+                f"Recommendation: "
+                f"{ai_analysis['recommendation']}"
+            )
+
+            st.write(
+                f"RSI: "
+                f"{ai_analysis['rsi']}"
+            )
+
+            st.write(
+                f"Volatility: "
+                f"{ai_analysis['volatility']}"
+            )
+
+            st.write("Reasons:")
+
+            for reason in ai_analysis["reasons"]:
+
+                st.success(reason)
+
+        else:
+
+            st.error(
+                "Unable to analyze this stock."
+            )
+
+# ---------------------------------------------------
+# FOOTER
+# ---------------------------------------------------
+
+st.markdown("---")
+
+st.markdown("""
+
+# 🚀 Multi-Agent AI System Features
+
+## AI Agents Included
+
+✅ Technical Analysis Agent  
+✅ Risk Analysis Agent  
+✅ AI Scoring Agent  
+✅ News Sentiment Agent  
+✅ Portfolio Recommendation Agent  
+
+## Technologies Used
+
+- Python
+- Streamlit
+- Plotly
+- Pandas
+- Matplotlib
+- yFinance
+- Multi-Agent AI Architecture
+- Financial Intelligence System
+
+""")
