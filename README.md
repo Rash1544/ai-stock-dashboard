@@ -71,3 +71,16 @@ cd ai-stock-dashboard
 pip install -r requirements.txt
 
 streamlit run app.py
+# 📷 Dashboard Screenshots
+
+## Main Dashboard
+![Dashboard](screenshots/dashboard.png)
+
+## Candlestick Analysis
+![Candlestick](screenshots/candlestick.png)
+
+## AI Recommendation System
+![Recommendation](screenshots/recommendation.png)
+
+## Risk Analysis
+![Risk](screenshots/risk.png)
